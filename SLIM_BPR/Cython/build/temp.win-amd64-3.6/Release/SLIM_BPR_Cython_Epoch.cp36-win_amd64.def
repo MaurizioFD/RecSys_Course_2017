@@ -1,0 +1,3 @@
+LIBRARY SLIM_BPR_Cython_Epoch.cp36-win_amd64.pyd
+EXPORTS
+PyInit_SLIM_BPR_Cython_Epoch

@@ -1,0 +1,3 @@
+LIBRARY Sparse_Matrix_Tree_CSR.cp36-win_amd64.pyd
+EXPORTS
+PyInit_Sparse_Matrix_Tree_CSR
