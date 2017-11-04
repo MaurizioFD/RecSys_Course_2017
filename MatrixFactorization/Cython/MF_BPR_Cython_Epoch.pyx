@@ -77,15 +77,11 @@ cdef class MF_BPR_Cython_Epoch:
 
 
 
-        if sgd_mode=='adagrad':
-            self.useAdaGrad = True
-        elif sgd_mode=='rmsprop':
-            self.rmsprop = True
-        elif sgd_mode=='sgd':
+        if sgd_mode=='sgd':
             pass
         else:
             raise ValueError(
-                "SGD_mode not valid. Acceptable values are: 'sgd', 'adagrad', 'rmsprop'. Provided value was '{}'".format(
+                "SGD_mode not valid. Acceptable values are: 'sgd'. Provided value was '{}'".format(
                     sgd_mode))
 
 
@@ -155,13 +151,13 @@ cdef class MF_BPR_Cython_Epoch:
 
             for index in range(self.num_factors):
 
-                x_uij = self.W[u,index] * (self.H[i,index] - self.H[j,index])
+                x_uij += self.W[u,index] * (self.H[i,index] - self.H[j,index])
 
             # Use gradient of log(sigm(-x_uij))
             sigmoid = 1 / (1 + exp(x_uij))
 
 
-            #   INCOMPATIBLE CODE
+            #   OLD CODE, YOU MAY TRY TO USE IT
             #
             # if self.useAdaGrad:
             #     cacheUpdate = gradient ** 2
@@ -222,25 +218,16 @@ cdef class MF_BPR_Cython_Epoch:
         cdef long index
         cdef int negItemSelected
 
+        # Warning: rand() returns an integer
 
-
-        # Warning: rand() returns an integer, in order to avoid integer division we force the
-        # denominator to be a float
-        cdef double RAND_MAX_DOUBLE = RAND_MAX
-
-
-        #index = int(rand() / RAND_MAX_DOUBLE * self.numEligibleUsers)
         index = rand() % self.numEligibleUsers
-
 
         sample.user = self.eligibleUsers[index]
 
         self.seenItemsSampledUser = self.getSeenItems(sample.user)
         self.numSeenItemsSampledUser = len(self.seenItemsSampledUser)
 
-        #index = int(rand() / RAND_MAX_DOUBLE * self.numSeenItemsSampledUser)
         index = rand() % self.numSeenItemsSampledUser
-
 
         sample.pos_item = self.seenItemsSampledUser[index]
 
@@ -250,7 +237,6 @@ cdef class MF_BPR_Cython_Epoch:
         # It's faster to just try again then to build a mapping of the non-seen items
         # for every user
         while (not negItemSelected):
-            #sample.neg_item = int(rand() / RAND_MAX_DOUBLE  * self.n_items)
             sample.neg_item = rand() % self.n_items
 
             index = 0
@@ -259,7 +245,5 @@ cdef class MF_BPR_Cython_Epoch:
 
             if index == self.numSeenItemsSampledUser:
                 negItemSelected = True
-
-        #print(sample)
 
         return sample

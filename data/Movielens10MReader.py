@@ -37,6 +37,8 @@ def loadCSVintoSparse (filePath, header = False, separator="::"):
                 cols.append(int(line[1]))
                 values.append(float(line[2]))
 
+    fileHandle.close()
+
     return  sps.csr_matrix((values, (rows, cols)), dtype=np.float32)
 
 
@@ -62,9 +64,10 @@ class Movielens10MReader(object):
 
         print("Movielens10MReader: loading data...")
 
-        dataSubfolder = "./data/ml-10M100K/"
+        dataSubfolder = "./data/"
 
-        URM_path = dataSubfolder + "ratings.dat"
+        dataFile = zipfile.ZipFile(dataSubfolder + "movielens_10m.zip")
+        URM_path = dataFile.extract("ml-10M100K/ratings.dat", path=dataSubfolder)
 
 
         if not loadPredefinedTrainTest:
@@ -73,8 +76,8 @@ class Movielens10MReader(object):
         else:
 
             try:
-                self.URM_train = loadCSVintoSparse(dataSubfolder + "URM_train.csv", separator=",")
-                self.URM_test = loadCSVintoSparse(dataSubfolder + "URM_test.csv", separator=",")
+                self.URM_train = sps.load_npz(dataSubfolder + "URM_train.npz")
+                self.URM_test = sps.load_npz(dataSubfolder + "URM_test.npz")
 
                 return
 
@@ -107,8 +110,8 @@ class Movielens10MReader(object):
             del self.URM_all
 
             print("Movielens10MReader: saving URM_train and URM_test")
-            saveSparseIntoCSV(dataSubfolder + "URM_train.csv", self.URM_train)
-            saveSparseIntoCSV(dataSubfolder + "URM_test.csv", self.URM_test)
+            sps.save_npz(dataSubfolder + "URM_train.npz", self.URM_train)
+            sps.save_npz(dataSubfolder + "URM_test.npz", self.URM_test)
 
         print("Movielens10MReader: loading complete")
 
