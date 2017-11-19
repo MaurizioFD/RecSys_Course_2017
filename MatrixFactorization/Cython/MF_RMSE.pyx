@@ -109,33 +109,46 @@ def AsySVD_sgd(R, num_factors=50, lrate=0.01, reg=0.015, iters=10, init_mean=0.0
     #
     for it in range(iters):     # for each iteration
         loss = 0.0
+
         for n in range(nnz):    # iterate over non-zero values in R only
             idx = shuffled_idx[n]
             rij = data[idx]
+
             # get the row and col indices of x_ij
             i = row_indices[idx]
             j = col_indices[idx]
+
             # get the latent factor of item j
             X_j = X[j].copy()
+
             # accumulate the item latent factors over the other items rated by i
             Y_acc = np.zeros(num_factors, dtype=np.float32)
             n_rated = 0
             start, end = indptr[i], indptr[i+1]
+
+            # For every rated item
             for l in col_indices[start:end]:
                 x_il = data[start + n_rated]
                 Y_acc += x_il * Y[l]
                 n_rated += 1
+
             if n_rated > 0:
                 Y_acc /= np.sqrt(n_rated)
+
             # compute the predicted rating
             rij_pred = np.dot(X_j, Y_acc)
+
             # compute the prediction error
             err = rij - rij_pred
+
             # update the loss
             loss += err**2
+
             # adjust the latent factors
             X[j] += lrate * (err * Y_acc - reg * X_j)
+
             # copy the current item preference factors
+            # Copy Y before the update to avoid mixing old and new values
             Y_copy = Y.copy()
             for l in col_indices[indptr[i]:indptr[i+1]]:
                 Y_l = Y_copy[l]
@@ -143,10 +156,13 @@ def AsySVD_sgd(R, num_factors=50, lrate=0.01, reg=0.015, iters=10, init_mean=0.0
 
         loss /= nnz
         print('Iter {} - loss: {:.4f}'.format(it+1, loss))
+
         # update the learning rate
         lrate *= lrate_decay
 
     return X, Y
+
+
 
 @cython.boundscheck(False)
 def AsySVD_compute_user_factors(user_profile, Y):
@@ -163,13 +179,17 @@ def AsySVD_compute_user_factors(user_profile, Y):
     cdef np.ndarray[np.float32_t, ndim=1] Y_acc = np.zeros(num_factors, dtype=np.float32)
     cdef int n_rated = len(col_indices)
     # aux variables
+
     cdef int n
+
     # accumulate the item vectors for the items rated by the user
     for n in range(n_rated):
         ril = data[n]
         Y_acc += ril * Y[col_indices[n]]
+
     if n_rated > 0:
         Y_acc /= np.sqrt(n_rated)
+
     return Y_acc
 
 
