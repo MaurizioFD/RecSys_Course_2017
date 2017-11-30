@@ -138,7 +138,7 @@ cdef class SLIM_BPR_Cython_Epoch:
 
         elif self.rmsprop:
             sgd_cache = np.zeros((self.n_items), dtype=float)
-            gamma = 0.001
+            gamma = 0.90
 
 
 
@@ -181,8 +181,8 @@ cdef class SLIM_BPR_Cython_Epoch:
             elif self.rmsprop:
                 cacheUpdate = sgd_cache[i] * gamma + (1 - gamma) * gradient ** 2
 
-                sgd_cache[i] += cacheUpdate
-                sgd_cache[j] += cacheUpdate
+                sgd_cache[i] = cacheUpdate
+                sgd_cache[j] = cacheUpdate
 
                 gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
 

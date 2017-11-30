@@ -1293,8 +1293,8 @@ static PyObject *__pyx_pf_21SLIM_BPR_Cython_Epoch_21SLIM_BPR_Cython_Epoch_2epoch
     __pyx_v_sgd_cache = __pyx_t_7;
     __pyx_t_7.memview = NULL;
     __pyx_t_7.data = NULL;
-</pre><pre class="cython line score-0" onclick='toggleDiv(this)'>+<span class="">0141</span>:             <span class="n">gamma</span> <span class="o">=</span> <span class="mf">0.001</span></pre>
-<pre class='cython code score-0 '>    __pyx_v_gamma = 0.001;
+</pre><pre class="cython line score-0" onclick='toggleDiv(this)'>+<span class="">0141</span>:             <span class="n">gamma</span> <span class="o">=</span> <span class="mf">0.90</span></pre>
+<pre class='cython code score-0 '>    __pyx_v_gamma = 0.90;
 </pre><pre class="cython line score-0">&#xA0;<span class="">0142</span>: </pre>
 <pre class="cython line score-0">&#xA0;<span class="">0143</span>: </pre>
 <pre class="cython line score-0">&#xA0;<span class="">0144</span>: </pre>
@@ -1598,7 +1598,7 @@ static PyObject *__pyx_pf_21SLIM_BPR_Cython_Epoch_21SLIM_BPR_Cython_Epoch_2epoch
       }
       __pyx_v_cacheUpdate = (((*((double *) ( /* dim=0 */ (__pyx_v_sgd_cache.data + __pyx_t_25 * __pyx_v_sgd_cache.strides[0]) ))) * __pyx_v_gamma) + ((1.0 - __pyx_v_gamma) * powf(__pyx_v_gradient, 2.0)));
 </pre><pre class="cython line score-0">&#xA0;<span class="">0183</span>: </pre>
-<pre class="cython line score-4" onclick='toggleDiv(this)'>+<span class="">0184</span>:                 <span class="n">sgd_cache</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cacheUpdate</span></pre>
+<pre class="cython line score-4" onclick='toggleDiv(this)'>+<span class="">0184</span>:                 <span class="n">sgd_cache</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">cacheUpdate</span></pre>
 <pre class='cython code score-4 '>      if (unlikely(!__pyx_v_sgd_cache.memview)) { <span class='pyx_c_api'>__Pyx_RaiseUnboundLocalError</span>("sgd_cache"); <span class='error_goto'>__PYX_ERR(0, 184, __pyx_L1_error)</span> }
       __pyx_t_26 = __pyx_v_i;
       __pyx_t_11 = -1;
@@ -1610,8 +1610,8 @@ static PyObject *__pyx_pf_21SLIM_BPR_Cython_Epoch_21SLIM_BPR_Cython_Epoch_2epoch
         <span class='pyx_c_api'>__Pyx_RaiseBufferIndexError</span>(__pyx_t_11);
         <span class='error_goto'>__PYX_ERR(0, 184, __pyx_L1_error)</span>
       }
-      *((double *) ( /* dim=0 */ (__pyx_v_sgd_cache.data + __pyx_t_26 * __pyx_v_sgd_cache.strides[0]) )) += __pyx_v_cacheUpdate;
-</pre><pre class="cython line score-4" onclick='toggleDiv(this)'>+<span class="">0185</span>:                 <span class="n">sgd_cache</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cacheUpdate</span></pre>
+      *((double *) ( /* dim=0 */ (__pyx_v_sgd_cache.data + __pyx_t_26 * __pyx_v_sgd_cache.strides[0]) )) = __pyx_v_cacheUpdate;
+</pre><pre class="cython line score-4" onclick='toggleDiv(this)'>+<span class="">0185</span>:                 <span class="n">sgd_cache</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">cacheUpdate</span></pre>
 <pre class='cython code score-4 '>      if (unlikely(!__pyx_v_sgd_cache.memview)) { <span class='pyx_c_api'>__Pyx_RaiseUnboundLocalError</span>("sgd_cache"); <span class='error_goto'>__PYX_ERR(0, 185, __pyx_L1_error)</span> }
       __pyx_t_27 = __pyx_v_j;
       __pyx_t_11 = -1;
@@ -1623,7 +1623,7 @@ static PyObject *__pyx_pf_21SLIM_BPR_Cython_Epoch_21SLIM_BPR_Cython_Epoch_2epoch
         <span class='pyx_c_api'>__Pyx_RaiseBufferIndexError</span>(__pyx_t_11);
         <span class='error_goto'>__PYX_ERR(0, 185, __pyx_L1_error)</span>
       }
-      *((double *) ( /* dim=0 */ (__pyx_v_sgd_cache.data + __pyx_t_27 * __pyx_v_sgd_cache.strides[0]) )) += __pyx_v_cacheUpdate;
+      *((double *) ( /* dim=0 */ (__pyx_v_sgd_cache.data + __pyx_t_27 * __pyx_v_sgd_cache.strides[0]) )) = __pyx_v_cacheUpdate;
 </pre><pre class="cython line score-0">&#xA0;<span class="">0186</span>: </pre>
 <pre class="cython line score-9" onclick='toggleDiv(this)'>+<span class="">0187</span>:                 <span class="n">gradient</span> <span class="o">=</span> <span class="n">gradient</span> <span class="o">/</span> <span class="p">(</span><span class="n">sqrt</span><span class="p">(</span><span class="n">sgd_cache</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span></pre>
 <pre class='cython code score-9 '>      if (unlikely(!__pyx_v_sgd_cache.memview)) { <span class='pyx_c_api'>__Pyx_RaiseUnboundLocalError</span>("sgd_cache"); <span class='error_goto'>__PYX_ERR(0, 187, __pyx_L1_error)</span> }
