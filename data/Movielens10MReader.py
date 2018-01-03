@@ -11,6 +11,8 @@ import numpy as np
 import scipy.sparse as sps
 import zipfile
 
+from Base.Recommender_utils import removeZeroRatingRowAndCol
+
 
 def loadCSVintoSparse (filePath, header = False, separator="::"):
 
@@ -56,11 +58,15 @@ def saveSparseIntoCSV (filePath, sparse_matrix, separator=","):
 
 
 
+
 class Movielens10MReader(object):
 
-    def __init__(self, splitTrainTest = False, trainPercentage = 0.8, loadPredefinedTrainTest = True):
+    def __init__(self, splitTrainTest = False, splitTrainTestValidation =[0.6, 0.2, 0.2] , loadPredefinedTrainTest = True):
 
         super(Movielens10MReader, self).__init__()
+
+        if sum(splitTrainTestValidation) != 1.0 or len(splitTrainTestValidation) != 3:
+            raise ValueError("Movielens10MReader: splitTrainTestValidation must be a probability distribution over Train, Test and Validation")
 
         print("Movielens10MReader: loading data...")
 
@@ -72,21 +78,24 @@ class Movielens10MReader(object):
 
         if not loadPredefinedTrainTest:
             self.URM_all = loadCSVintoSparse(URM_path, separator="::")
+            self.URM_all = removeZeroRatingRowAndCol(self.URM_all)
 
         else:
 
             try:
                 self.URM_train = sps.load_npz(dataSubfolder + "URM_train.npz")
                 self.URM_test = sps.load_npz(dataSubfolder + "URM_test.npz")
+                self.URM_validation = sps.load_npz(dataSubfolder + "URM_validation.npz")
 
                 return
 
             except FileNotFoundError:
                 # Rebuild split
-                print("Movielens10MReader: URM_train or URM_test not found. Building new ones")
+                print("Movielens10MReader: URM_train or URM_test or URM_validation not found. Building new ones")
 
                 splitTrainTest = True
                 self.URM_all = loadCSVintoSparse(URM_path)
+                self.URM_all = removeZeroRatingRowAndCol(self.URM_all)
 
 
 
@@ -96,22 +105,29 @@ class Movielens10MReader(object):
 
             numInteractions= len(self.URM_all.data)
 
-            mask = np.random.choice([True, False], numInteractions, p=[trainPercentage, 1 - trainPercentage])
+            split = np.random.choice([1, 2, 3], numInteractions, p=splitTrainTestValidation)
 
 
-            self.URM_train = sps.coo_matrix((self.URM_all.data[mask], (self.URM_all.row[mask], self.URM_all.col[mask])))
+            trainMask = split == 1
+            self.URM_train = sps.coo_matrix((self.URM_all.data[trainMask], (self.URM_all.row[trainMask], self.URM_all.col[trainMask])))
             self.URM_train = self.URM_train.tocsr()
 
-            mask = np.logical_not(mask)
+            testMask = split == 2
 
-            self.URM_test = sps.coo_matrix((self.URM_all.data[mask], (self.URM_all.row[mask], self.URM_all.col[mask])))
+            self.URM_test = sps.coo_matrix((self.URM_all.data[testMask], (self.URM_all.row[testMask], self.URM_all.col[testMask])))
             self.URM_test = self.URM_test.tocsr()
+
+            validationMask = split == 3
+
+            self.URM_validation = sps.coo_matrix((self.URM_all.data[validationMask], (self.URM_all.row[validationMask], self.URM_all.col[validationMask])))
+            self.URM_validation = self.URM_validation.tocsr()
 
             del self.URM_all
 
             print("Movielens10MReader: saving URM_train and URM_test")
             sps.save_npz(dataSubfolder + "URM_train.npz", self.URM_train)
             sps.save_npz(dataSubfolder + "URM_test.npz", self.URM_test)
+            sps.save_npz(dataSubfolder + "URM_validation.npz", self.URM_validation)
 
         print("Movielens10MReader: loading complete")
 
@@ -123,3 +139,6 @@ class Movielens10MReader(object):
 
     def get_URM_test(self):
         return self.URM_test
+
+    def get_URM_validation(self):
+        return self.URM_validation

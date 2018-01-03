@@ -6,7 +6,8 @@ Created on 07/09/17
 @author: Maurizio Ferrari Dacrema
 """
 
-from Recommender import Recommender
+from Base.Recommender_utils import similarityMatrixTopK
+from Base.Recommender import Recommender
 import subprocess
 import os, sys
 import time
@@ -16,8 +17,7 @@ import numpy as np
 class MF_BPR_Cython(Recommender):
 
 
-    def __init__(self, URM_train, positive_threshold=4, recompile_cython = False,
-                 num_factors=10):
+    def __init__(self, URM_train, recompile_cython = False):
 
 
         super(MF_BPR_Cython, self).__init__()
@@ -27,8 +27,6 @@ class MF_BPR_Cython(Recommender):
         self.n_users = URM_train.shape[0]
         self.n_items = URM_train.shape[1]
         self.normalize = False
-        self.num_factors = num_factors
-        self.positive_threshold = positive_threshold
 
         if recompile_cython:
             print("Compiling in Cython")
@@ -38,11 +36,13 @@ class MF_BPR_Cython(Recommender):
 
 
     def fit(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, filterCustomItems = np.array([], dtype=np.int), minRatingsPerUser=1,
-            batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
+            batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0, num_factors=10,  positive_threshold=4,
             learning_rate = 0.05, sgd_mode='sgd', user_reg = 0.0, positive_reg = 0.0, negative_reg = 0.0):
 
 
         self.eligibleUsers = []
+        self.num_factors = num_factors
+        self.positive_threshold = positive_threshold
 
         # Select only positive interactions
         URM_train_positive = self.URM_train.copy()
@@ -108,8 +108,8 @@ class MF_BPR_Cython(Recommender):
                 self.W = self.cythonEpoch.get_W()
                 self.H = self.cythonEpoch.get_H()
 
-                results_run = self.evaluateRecommendations(URM_test,
-                                                           minRatingsPerUser=minRatingsPerUser)
+                results_run = self.evaluateRecommendations(URM_test, filterTopPop=filterTopPop,
+                                                           minRatingsPerUser=minRatingsPerUser, filterCustomItems=filterCustomItems)
 
                 self.writeCurrentConfig(currentEpoch, results_run, logFile)
 
@@ -200,34 +200,68 @@ class MF_BPR_Cython(Recommender):
 
 
 
-    def recommend(self, user_id, n=None, exclude_seen=True, filterTopPop = False, filterCustomItems = False):
+    def recommendBatch(self, users_in_batch, n=None, exclude_seen=True, filterTopPop = False, filterCustomItems = False):
 
         # compute the scores using the dot product
-        user_profile = self.URM_train[user_id]
+        user_profile_batch = self.URM_train[users_in_batch]
+
+        scores_array = np.dot(self.W[users_in_batch], self.H.T)
+
+        if self.normalize:
+            raise ValueError("Not implemented")
+
+        # To exclude seen items perform a boolean indexing and replace their score with -inf
+        # Seen items will be at the bottom of the list but there is no guarantee they'll NOT be
+        # recommended
+        if exclude_seen:
+            scores_array[user_profile_batch.nonzero()] = -np.inf
+
+        if filterTopPop:
+            scores_array[:,self.filterTopPop_ItemsID] = -np.inf
+
+        if filterCustomItems:
+            scores_array[:, self.filterCustomItems_ItemsID] = -np.inf
+
+
+        # rank items and mirror column to obtain a ranking in descending score
+        #ranking = (-scores_array).argsort(axis=1)
+        #ranking = np.fliplr(ranking)
+        #ranking = ranking[:,0:n]
+
+        ranking = np.zeros((scores_array.shape[0],n), dtype=np.int)
+
+        for row_index in range(scores_array.shape[0]):
+            scores = scores_array[row_index]
+
+            relevant_items_partition = (-scores).argpartition(n)[0:n]
+            relevant_items_partition_sorting = np.argsort(-scores[relevant_items_partition])
+            ranking[row_index] = relevant_items_partition[relevant_items_partition_sorting]
+
+
+        return ranking
+
+
+
+    def recommend(self, user_id, n=None, exclude_seen=True, filterTopPop = False, filterCustomItems = False):
+
+
+        if n==None:
+            n=self.URM_train.shape[1]-1
 
         scores_array = np.dot(self.W[user_id], self.H.T)
 
-
         if self.normalize:
-            # normalization will keep the scores in the same range
-            # of value of the ratings in dataset
-            rated = user_profile.copy()
-            rated.data = np.ones_like(rated.data)
-            if self.sparse_weights:
-                den = rated.dot(self.W_sparse).toarray().ravel()
-            else:
-                den = rated.dot(self.W).ravel()
-            den[np.abs(den) < 1e-6] = 1.0  # to avoid NaNs
-            scores_array /= den
+            raise ValueError("Not implemented")
+
 
         if exclude_seen:
-            scores_array = self._filter_seen_on_scores(user_id, scores_array)
+            scores = self._filter_seen_on_scores(user_id, scores_array)
 
         if filterTopPop:
-            scores_array = self._filter_TopPop_on_scores(scores_array)
+            scores = self._filter_TopPop_on_scores(scores_array)
 
         if filterCustomItems:
-            scores_array = self._filterCustomItems_on_scores(scores_array)
+            scores = self._filterCustomItems_on_scores(scores_array)
 
 
         # rank items and mirror column to obtain a ranking in descending score

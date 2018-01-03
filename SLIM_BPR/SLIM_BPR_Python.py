@@ -11,12 +11,12 @@ import time
 
 import numpy as np
 import scipy.sparse as sps
-from Recommender_utils import similarityMatrixTopK
-from Similarity_Matrix_Recommender import Similarity_Matrix_Recommender
+from Base.Recommender_utils import similarityMatrixTopK
+from Base.Similarity_Matrix_Recommender import Similarity_Matrix_Recommender
 from scipy.special import expit
 
-from BPR_Sampling import BPR_Sampling
-from Recommender import Recommender
+from BPR.BPR_Sampling import BPR_Sampling
+from Base.Recommender import Recommender
 
 
 def sigmoidFunction(x):
@@ -25,9 +25,28 @@ def sigmoidFunction(x):
 
 class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
-    def __init__(self, URM_train, positive_threshold=3, sparse_weights = False):
+    def __init__(self, URM_train, positive_threshold=4, sparse_weights = False):
         super(SLIM_BPR_Python, self).__init__()
 
+        """
+          Creates a new object for training and testing a Bayesian
+          Personalised Ranking (BPR) SLIM
+
+          This object uses the Theano library for training the model, meaning
+          it can run on a GPU through CUDA. To make sure your Theano
+          install is using the GPU, see:
+
+            http://deeplearning.net/software/theano/tutorial/using_gpu.html
+
+          When running on CPU, we recommend using OpenBLAS.
+
+            http://www.openblas.net/
+        """
+        """
+        if objective!='sigmoid' and objective != 'logsigmoid':
+            raise ValueError("Objective not valid. Acceptable values are 'sigmoid' and 'logsigmoid'. Provided value was '{}'".format(objective))
+        self.objective = objective
+        """
 
         self.URM_train = URM_train
         self.n_users = URM_train.shape[0]
@@ -57,11 +76,14 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
     def updateSimilarityMatrix(self):
 
         if self.topK != False:
-            self.sparse_weights = True
-            self.W_sparse = similarityMatrixTopK(self.S.T, k=self.topK)
+            if self.sparse_weights:
+                self.W_sparse = similarityMatrixTopK(self.S.T, k=self.topK, forceSparseOutput=True)
+            else:
+                self.W = similarityMatrixTopK(self.S.T, k=self.topK, forceSparseOutput=False)
+
         else:
-            if self.sparse_weights == True:
-                self.W_sparse = self.S.T
+            if self.sparse_weights:
+                self.W_sparse = sps.csr_matrix(self.S.T)
             else:
                 self.W = self.S.T
 
@@ -139,6 +161,15 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
             gradient = np.sum(1 / (1 + np.exp(x_uij))) / self.batch_size
 
+        # Sigmoid whose argument is minus in order for the exponent of the exponential to be positive
+        # Best performance with: gradient = np.sum(expit(-x_uij)) / self.batch_size
+        #gradient = np.sum(x_uij) / self.batch_size
+        #gradient = expit(-gradient)
+        #gradient = np.sum(expit(-x_uij)) / self.batch_size
+        #gradient = np.sum(np.log(expit(x_uij))) / self.batch_size
+        #gradient = np.sum(1/(1+np.exp(x_uij))) / self.batch_size
+        #gradient = min(10, max(-10, gradient))+10
+
 
         if self.batch_size==1:
 
@@ -170,7 +201,7 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
             self.S[j] -= self.learning_rate * gradient * itemsToUpdate
             self.S[j, j] = 0
 
-    def fit(self, epochs=30, logFile=None, URM_test=None, minRatingsPerUser=1,
+    def fit(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, minRatingsPerUser=1,
             batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
             lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False):
 
@@ -182,6 +213,7 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
         self.fit_alreadyInitialized(epochs=epochs,
                                     logFile=logFile,
                                     URM_test=URM_test,
+                                    filterTopPop = filterTopPop,
                                     minRatingsPerUser=minRatingsPerUser,
                                     batch_size = batch_size,
                                     validate_every_N_epochs = validate_every_N_epochs,
@@ -193,7 +225,7 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
 
 
-    def fit_alreadyInitialized(self, epochs=30, logFile=None, URM_test=None, minRatingsPerUser=1,
+    def fit_alreadyInitialized(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, minRatingsPerUser=1,
             batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
             lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False):
         """
@@ -237,7 +269,7 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
                 print("Evaluation begins")
 
 
-                results_run = self.evaluateRecommendations(URM_test,
+                results_run = self.evaluateRecommendations(URM_test, filterTopPop=filterTopPop,
                                                            minRatingsPerUser=minRatingsPerUser)
 
                 self.writeCurrentConfig(currentEpoch, results_run, logFile)

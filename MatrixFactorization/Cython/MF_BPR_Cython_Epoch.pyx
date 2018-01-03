@@ -15,7 +15,7 @@ Created on 07/09/17
 
 #defining NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
-from Recommender_utils import check_matrix
+from Base.Recommender_utils import check_matrix
 import numpy as np
 cimport numpy as np
 import time
@@ -77,11 +77,15 @@ cdef class MF_BPR_Cython_Epoch:
 
 
 
-        if sgd_mode=='sgd':
+        if sgd_mode=='adagrad':
+            self.useAdaGrad = True
+        elif sgd_mode=='rmsprop':
+            self.rmsprop = True
+        elif sgd_mode=='sgd':
             pass
         else:
             raise ValueError(
-                "SGD_mode not valid. Acceptable values are: 'sgd'. Provided value was '{}'".format(
+                "SGD_mode not valid. Acceptable values are: 'sgd', 'adagrad', 'rmsprop'. Provided value was '{}'".format(
                     sgd_mode))
 
 
@@ -115,24 +119,25 @@ cdef class MF_BPR_Cython_Epoch:
         cdef BPR_sample sample
         cdef long u, i, j
         cdef long index, numCurrentBatch
-        cdef double x_uij, sigmoid
+        cdef double x_uij, sigmoid_user, sigmoid_item
 
         cdef int numSeenItems
 
         # Variables for AdaGrad and RMSprop
-        cdef double [:] sgd_cache
+        cdef double [:] sgd_cache_item_factors, sgd_cache_user_factors
         cdef double cacheUpdate
         cdef float gamma
 
         cdef double H_i, H_j, W_u
 
-        #
-        # if self.useAdaGrad:
-        #     sgd_cache = np.zeros((self.n_items), dtype=float)
-        #
+
+        if self.useAdaGrad:
+             sgd_cache_item_factors = np.zeros((self.n_items), dtype=float)
+             sgd_cache_user_factors = np.zeros((self.n_users), dtype=float)
+
         # elif self.rmsprop:
         #     sgd_cache = np.zeros((self.n_items), dtype=float)
-        #     gamma = 0.90
+        #     gamma = 0.001
 
 
         cdef long start_time_epoch = time.time()
@@ -151,27 +156,31 @@ cdef class MF_BPR_Cython_Epoch:
 
             for index in range(self.num_factors):
 
-                x_uij += self.W[u,index] * (self.H[i,index] - self.H[j,index])
+                x_uij = self.W[u,index] * (self.H[i,index] - self.H[j,index])
 
             # Use gradient of log(sigm(-x_uij))
-            sigmoid = 1 / (1 + exp(x_uij))
+            sigmoid_item = 1 / (1 + exp(x_uij))
+            sigmoid_user = sigmoid_item
 
 
-            #   OLD CODE, YOU MAY TRY TO USE IT
-            #
-            # if self.useAdaGrad:
-            #     cacheUpdate = gradient ** 2
-            #
-            #     sgd_cache[i] += cacheUpdate
-            #     sgd_cache[j] += cacheUpdate
-            #
-            #     gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
-            #
+
+
+            if self.useAdaGrad:
+                cacheUpdate = sigmoid_item ** 2
+
+                sgd_cache_item_factors[i] += cacheUpdate
+                sgd_cache_item_factors[j] += cacheUpdate
+                sgd_cache_user_factors[u] += cacheUpdate
+
+                sigmoid_item = sigmoid_item / (sqrt(sgd_cache_item_factors[i]) + 1e-8)
+                sigmoid_user = sigmoid_user / (sqrt(sgd_cache_user_factors[u]) + 1e-8)
+
+            #   INCOMPATIBLE CODE
             # elif self.rmsprop:
             #     cacheUpdate = sgd_cache[i] * gamma + (1 - gamma) * gradient ** 2
             #
-            #     sgd_cache[i] = cacheUpdate
-            #     sgd_cache[j] = cacheUpdate
+            #     sgd_cache[i] += cacheUpdate
+            #     sgd_cache[j] += cacheUpdate
             #
             #     gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
 
@@ -183,9 +192,9 @@ cdef class MF_BPR_Cython_Epoch:
                 H_j = self.H[j, index]
                 W_u = self.W[u, index]
 
-                self.W[u, index] += self.learning_rate * (sigmoid * ( H_i - H_j ) - self.user_reg * W_u)
-                self.H[i, index] += self.learning_rate * (sigmoid * ( W_u ) - self.positive_reg * H_i)
-                self.H[j, index] += self.learning_rate * (sigmoid * (-W_u ) - self.negative_reg * H_j)
+                self.W[u, index] += self.learning_rate * (sigmoid_user * ( H_i - H_j ) - self.user_reg * W_u)
+                self.H[i, index] += self.learning_rate * (sigmoid_item * ( W_u ) - self.positive_reg * H_i)
+                self.H[j, index] += self.learning_rate * (sigmoid_item * (-W_u ) - self.negative_reg * H_j)
 
 
 
@@ -218,16 +227,25 @@ cdef class MF_BPR_Cython_Epoch:
         cdef long index
         cdef int negItemSelected
 
-        # Warning: rand() returns an integer
 
+
+        # Warning: rand() returns an integer, in order to avoid integer division we force the
+        # denominator to be a float
+        cdef double RAND_MAX_DOUBLE = RAND_MAX
+
+
+        #index = int(rand() / RAND_MAX_DOUBLE * self.numEligibleUsers)
         index = rand() % self.numEligibleUsers
+
 
         sample.user = self.eligibleUsers[index]
 
         self.seenItemsSampledUser = self.getSeenItems(sample.user)
         self.numSeenItemsSampledUser = len(self.seenItemsSampledUser)
 
+        #index = int(rand() / RAND_MAX_DOUBLE * self.numSeenItemsSampledUser)
         index = rand() % self.numSeenItemsSampledUser
+
 
         sample.pos_item = self.seenItemsSampledUser[index]
 
@@ -237,6 +255,7 @@ cdef class MF_BPR_Cython_Epoch:
         # It's faster to just try again then to build a mapping of the non-seen items
         # for every user
         while (not negItemSelected):
+            #sample.neg_item = int(rand() / RAND_MAX_DOUBLE  * self.n_items)
             sample.neg_item = rand() % self.n_items
 
             index = 0
@@ -245,5 +264,7 @@ cdef class MF_BPR_Cython_Epoch:
 
             if index == self.numSeenItemsSampledUser:
                 negItemSelected = True
+
+        #print(sample)
 
         return sample

@@ -15,7 +15,7 @@ Created on 07/09/17
 
 #defining NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
-from Recommender_utils import similarityMatrixTopK, check_matrix
+from Base.Recommender_utils import similarityMatrixTopK, check_matrix
 import numpy as np
 cimport numpy as np
 import time
@@ -75,6 +75,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         if self.sparse_weights:
 
             self.S_sparse = Sparse_Matrix_Tree_CSR(self.n_items, self.n_items)
+            #self.S_sparse = Sparse_Matrix_CSR(self.n_items, self.n_items)
 
         else:
             self.S_dense = np.zeros((self.n_items, self.n_items), dtype=np.float64)
@@ -138,7 +139,7 @@ cdef class SLIM_BPR_Cython_Epoch:
 
         elif self.rmsprop:
             sgd_cache = np.zeros((self.n_items), dtype=float)
-            gamma = 0.90
+            gamma = 0.001
 
 
 
@@ -160,6 +161,7 @@ cdef class SLIM_BPR_Cython_Epoch:
                 seenItem = self.seenItemsSampledUser[index]
                 index +=1
 
+                #print("Get: i {}, j {}, seenItem {}".format(i, j, seenItem))
 
                 if self.sparse_weights:
 
@@ -181,8 +183,8 @@ cdef class SLIM_BPR_Cython_Epoch:
             elif self.rmsprop:
                 cacheUpdate = sgd_cache[i] * gamma + (1 - gamma) * gradient ** 2
 
-                sgd_cache[i] = cacheUpdate
-                sgd_cache[j] = cacheUpdate
+                sgd_cache[i] += cacheUpdate
+                sgd_cache[j] += cacheUpdate
 
                 gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
 
@@ -211,6 +213,11 @@ cdef class SLIM_BPR_Cython_Epoch:
 
                     if seenItem != j:
                         self.S_dense[j, seenItem] -= self.learning_rate * gradient
+
+
+            # If I have reached at least 20% of the total number of batches or samples
+            if self.sparse_weights and numCurrentBatch % (totalNumberOfBatch/5) == 0 and numCurrentBatch!=0:
+                self.S_sparse.rebalance_tree(TopK=self.topK)
 
 
             if((numCurrentBatch%printStep==0 and not numCurrentBatch==0) or numCurrentBatch==totalNumberOfBatch-1):
@@ -262,7 +269,7 @@ cdef class SLIM_BPR_Cython_Epoch:
 
     cdef BPR_sample sampleBatch_Cython(self):
 
-        cdef BPR_sample sample = BPR_sample()
+        cdef BPR_sample sample = BPR_sample(-1,-1,-1)
         cdef long index
         cdef int negItemSelected
 
@@ -273,7 +280,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         cdef double RAND_MAX_DOUBLE = RAND_MAX
 
 
-        index = int(rand() / RAND_MAX_DOUBLE * self.numEligibleUsers )
+        index = rand() % self.numEligibleUsers
 
 
         sample.user = self.eligibleUsers[index]
@@ -281,7 +288,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         self.seenItemsSampledUser = self.getSeenItems(sample.user)
         self.numSeenItemsSampledUser = len(self.seenItemsSampledUser)
 
-        index = int(rand() / RAND_MAX_DOUBLE * self.numSeenItemsSampledUser )
+        index = rand() % self.numSeenItemsSampledUser
 
 
         sample.pos_item = self.seenItemsSampledUser[index]
@@ -292,7 +299,8 @@ cdef class SLIM_BPR_Cython_Epoch:
         # It's faster to just try again then to build a mapping of the non-seen items
         # for every user
         while (not negItemSelected):
-            sample.neg_item = int(rand() / RAND_MAX_DOUBLE  * self.n_items )
+
+            sample.neg_item = rand() % self.n_items
 
             index = 0
             while index < self.numSeenItemsSampledUser and self.seenItemsSampledUser[index]!=sample.neg_item:
@@ -559,9 +567,11 @@ cdef class Sparse_Matrix_Tree_CSR:
 
                 # Flatten the data structure
                 self.row_pointer[row].head = self.subtree_to_list_flat(self.row_pointer[row].head)
+                #print("subtree_to_list_flat {} sec".format(time.time() - start_time))
 
                 if TopK:
                     self.row_pointer[row].head = self.topK_selection_from_list(self.row_pointer[row].head, TopK)
+                    #print("topK_selection_from_list {} sec".format(time.time() - start_time))
 
 
                 # Flatten the tree data
@@ -571,6 +581,7 @@ cdef class Sparse_Matrix_Tree_CSR:
 
                 # Rebuild the tree
                 self.row_pointer[row].head = self.build_tree_from_list_flat(self.row_pointer[row].head)
+                #print("build_tree_from_list_flat {} sec".format(time.time() - start_time))
 
 
         #Set terminal indptr
@@ -597,12 +608,15 @@ cdef class Sparse_Matrix_Tree_CSR:
 
                 # Flatten the data structure
                 self.row_pointer[row].head = self.subtree_to_list_flat(self.row_pointer[row].head)
+                #print("subtree_to_list_flat {} sec".format(time.time() - start_time))
 
                 if TopK:
                     self.row_pointer[row].head = self.topK_selection_from_list(self.row_pointer[row].head, TopK)
+                    #print("topK_selection_from_list {} sec".format(time.time() - start_time))
 
                 # Rebuild the tree
                 self.row_pointer[row].head = self.build_tree_from_list_flat(self.row_pointer[row].head)
+                #print("build_tree_from_list_flat {} sec".format(time.time() - start_time))
 
 
 

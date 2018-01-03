@@ -27,71 +27,161 @@ class FunkSVD(Recommender):
     '''
 
     # TODO: add global effects
-    def __init__(self,
-                 num_factors=50,
-                 lrate=0.01,
+    def __init__(self, URM_train):
+
+        super(FunkSVD, self).__init__()
+
+        self.URM_train = check_matrix(URM_train, 'csr', dtype=np.float32)
+
+
+
+    def __str__(self):
+        return "FunkSVD(num_factors={}, lrate={}, reg={}, iters={}, init_mean={}, " \
+               "init_std={}, lrate_decay={}, rnd_seed={})".format(
+            self.num_factors, self.learning_rate, self.reg, self.epochs, self.init_mean, self.init_std, self.lrate_decay,
+            self.rnd_seed
+        )
+
+
+    def fit(self, num_factors=50,
+                 learning_rate=0.01,
                  reg=0.015,
-                 iters=10,
+                 epochs=10,
                  init_mean=0.0,
                  init_std=0.1,
                  lrate_decay=1.0,
                  rnd_seed=42):
-        '''
+        """
+
         Initialize the model
         :param num_factors: number of latent factors
-        :param lrate: initial learning rate used in SGD
+        :param learning_rate: initial learning rate used in SGD
         :param reg: regularization term
-        :param iters: number of iterations in training the model with SGD
+        :param epochs: number of iterations in training the model with SGD
         :param init_mean: mean used to initialize the latent factors
         :param init_std: standard deviation used to initialize the latent factors
         :param lrate_decay: learning rate decay
         :param rnd_seed: random seed
-        '''
-        super(FunkSVD, self).__init__()
+        """
+
         self.num_factors = num_factors
-        self.lrate = lrate
+        self.learning_rate = learning_rate
         self.reg = reg
-        self.iters = iters
+        self.epochs = epochs
         self.init_mean = init_mean
         self.init_std = init_std
         self.lrate_decay = lrate_decay
         self.rnd_seed = rnd_seed
 
-    def __str__(self):
-        return "FunkSVD(num_factors={}, lrate={}, reg={}, iters={}, init_mean={}, " \
-               "init_std={}, lrate_decay={}, rnd_seed={})".format(
-            self.num_factors, self.lrate, self.reg, self.iters, self.init_mean, self.init_std, self.lrate_decay,
-            self.rnd_seed
-        )
-
-    def fit(self, X):
-        self.dataset = X
-        X = check_matrix(X, 'csr', dtype=np.float32)
-        self.U, self.V = FunkSVD_sgd(X, self.num_factors, self.lrate, self.reg, self.iters, self.init_mean,
+        self.U, self.V = FunkSVD_sgd(self.URM_train, self.num_factors, self.learning_rate, self.reg, self.epochs, self.init_mean,
                                      self.init_std,
                                      self.lrate_decay, self.rnd_seed)
 
-    def recommend(self, user_id, n=None, exclude_seen=True):
-        scores = np.dot(self.U[user_id], self.V.T)
-        ranking = scores.argsort()[::-1]
-        # rank items
+    # def recommend(self, user_id, n=None, exclude_seen=True):
+    #     scores = np.dot(self.U[user_id], self.V.T)
+    #     ranking = scores.argsort()[::-1]
+    #     # rank items
+    #     if exclude_seen:
+    #         ranking = self._filter_seen(user_id, ranking)
+    #     return ranking[:n]
+    #
+    #
+    # def _get_user_ratings(self, user_id):
+    #     return self.dataset[user_id]
+    #
+    # def _get_item_ratings(self, item_id):
+    #     return self.dataset[:, item_id]
+    #
+    #
+    # def _filter_seen(self, user_id, ranking):
+    #     user_profile = self._get_user_ratings(user_id)
+    #     seen = user_profile.indices
+    #     unseen_mask = np.in1d(ranking, seen, assume_unique=True, invert=True)
+    #     return ranking[unseen_mask]
+
+
+
+
+
+    def recommendBatch(self, users_in_batch, n=None, exclude_seen=True, filterTopPop = False, filterCustomItems = False):
+
+        # compute the scores using the dot product
+        user_profile_batch = self.URM_train[users_in_batch]
+
+        scores_array = np.dot(self.U[users_in_batch], self.V.T)
+
+        if self.normalize:
+            raise ValueError("Not implemented")
+
+        # To exclude seen items perform a boolean indexing and replace their score with -inf
+        # Seen items will be at the bottom of the list but there is no guarantee they'll NOT be
+        # recommended
         if exclude_seen:
-            ranking = self._filter_seen(user_id, ranking)
-        return ranking[:n]
+            scores_array[user_profile_batch.nonzero()] = -np.inf
+
+        if filterTopPop:
+            scores_array[:,self.filterTopPop_ItemsID] = -np.inf
+
+        if filterCustomItems:
+            scores_array[:, self.filterCustomItems_ItemsID] = -np.inf
 
 
-    def _get_user_ratings(self, user_id):
-        return self.dataset[user_id]
+        # rank items and mirror column to obtain a ranking in descending score
+        #ranking = (-scores_array).argsort(axis=1)
+        #ranking = np.fliplr(ranking)
+        #ranking = ranking[:,0:n]
 
-    def _get_item_ratings(self, item_id):
-        return self.dataset[:, item_id]
+        ranking = np.zeros((scores_array.shape[0],n), dtype=np.int)
+
+        for row_index in range(scores_array.shape[0]):
+            scores = scores_array[row_index]
+
+            relevant_items_partition = (-scores).argpartition(n)[0:n]
+            relevant_items_partition_sorting = np.argsort(-scores[relevant_items_partition])
+            ranking[row_index] = relevant_items_partition[relevant_items_partition_sorting]
 
 
-    def _filter_seen(self, user_id, ranking):
-        user_profile = self._get_user_ratings(user_id)
-        seen = user_profile.indices
-        unseen_mask = np.in1d(ranking, seen, assume_unique=True, invert=True)
-        return ranking[unseen_mask]
+        return ranking
+
+
+
+    def recommend(self, user_id, n=None, exclude_seen=True, filterTopPop = False, filterCustomItems = False):
+
+
+        if n==None:
+            n=self.URM_train.shape[1]-1
+
+        scores_array = np.dot(self.U[user_id], self.V.T)
+
+        if self.normalize:
+            raise ValueError("Not implemented")
+
+
+        if exclude_seen:
+            scores = self._filter_seen_on_scores(user_id, scores_array)
+
+        if filterTopPop:
+            scores = self._filter_TopPop_on_scores(scores_array)
+
+        if filterCustomItems:
+            scores = self._filterCustomItems_on_scores(scores_array)
+
+
+        # rank items and mirror column to obtain a ranking in descending score
+        #ranking = scores.argsort()
+        #ranking = np.flip(ranking, axis=0)
+
+        # Sorting is done in three steps. Faster then plain np.argsort for higher number of items
+        # - Partition the data to extract the set of relevant items
+        # - Sort only the relevant items
+        # - Get the original item index
+        relevant_items_partition = (-scores_array).argpartition(n)[0:n]
+        relevant_items_partition_sorting = np.argsort(-scores_array[relevant_items_partition])
+        ranking = relevant_items_partition[relevant_items_partition_sorting]
+
+
+        return ranking
+
 
 
 

@@ -6,6 +6,7 @@ Created on 07/09/17
 @author: Maurizio Ferrari Dacrema
 """
 
+from Base.Recommender_utils import similarityMatrixTopK
 from SLIM_BPR.SLIM_BPR_Python import SLIM_BPR_Python
 import subprocess
 import os, sys
@@ -15,7 +16,7 @@ import numpy as np
 class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
-    def __init__(self, URM_train, positive_threshold=3, recompile_cython = False, sparse_weights = False, sgd_mode='adagrad'):
+    def __init__(self, URM_train, positive_threshold=4, recompile_cython = False, sparse_weights = False, sgd_mode='adagrad'):
 
 
         super(SLIM_BPR_Cython, self).__init__(URM_train,
@@ -33,13 +34,10 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
 
-    def fit(self, epochs=30, logFile=None, URM_test=None, minRatingsPerUser=1,
+    def fit(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, minRatingsPerUser=1,
             batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
             lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False, sgd_mode='adagrad'):
 
-
-        # if topK!= False:
-        #     raise ValueError("Nope, TopK è rotto da qualche parte")
 
         self.eligibleUsers = []
 
@@ -78,6 +76,7 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
         super(SLIM_BPR_Cython, self).fit_alreadyInitialized(epochs=epochs,
                                          logFile=logFile,
                                          URM_test=URM_test,
+                                         filterTopPop=filterTopPop,
                                          minRatingsPerUser=minRatingsPerUser,
                                          batch_size=batch_size,
                                          validate_every_N_epochs=validate_every_N_epochs,
@@ -96,6 +95,7 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
         # appropriate subfolder and not the project root
 
         compiledModuleSubfolder = "/SLIM_BPR/Cython"
+        #fileToCompile_list = ['Sparse_Matrix_CSR.pyx', 'SLIM_BPR_Cython_Epoch.pyx']
         fileToCompile_list = ['SLIM_BPR_Cython_Epoch.pyx']
 
         for fileToCompile in fileToCompile_list:
@@ -151,9 +151,11 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
                           'sgd_mode': self.sgd_mode}
 
         print("Test case: {}\nResults {}\n".format(current_config, results_run))
+        # print("Weights: {}\n".format(str(list(self.weights))))
 
         sys.stdout.flush()
 
         if (logFile != None):
             logFile.write("Test case: {}, Results {}\n".format(current_config, results_run))
+            # logFile.write("Weights: {}\n".format(str(list(self.weights))))
             logFile.flush()
