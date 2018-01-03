@@ -1,5 +1,5 @@
 import unittest
-from data.ml10m.Movielens10MReader import Movielens10MReader
+
 from Base.Recommender_utils import similarityMatrixTopK
 import subprocess, os
 import numpy as np
@@ -389,6 +389,8 @@ def runCompilationScript():
     #subprocess.call(["cython", "-a", "cosine_similarity.pyx"])
 
 if __name__ == '__main__':
+
+    from data.Movielens10MReader import Movielens10MReader
 
     runCompilationScript()
 
