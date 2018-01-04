@@ -1,4 +1,9 @@
-__author__ = 'massimo'
+
+"""
+
+@author: Massimo Quadrana
+"""
+
 import numpy as np
 import unittest
 

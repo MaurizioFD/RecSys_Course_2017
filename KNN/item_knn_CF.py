@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on 5/09/2017
+
+@author: Maurizio Ferrari Dacrema
+"""
 
 from Base.Recommender import Recommender
 from Base.Recommender_utils import check_matrix

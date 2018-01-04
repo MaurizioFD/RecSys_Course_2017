@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on 5/09/2017
+
+@author: Massimo Quadrana
+"""
+
 #cython: boundscheck=False
 #cython: wraparound=False
 #cython: initializedcheck=False

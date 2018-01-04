@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on 5/09/2017
+
+@author: Maurizio Ferrari Dacrema
+"""
+
 import numpy as np
 
 from Base.Recommender import Recommender

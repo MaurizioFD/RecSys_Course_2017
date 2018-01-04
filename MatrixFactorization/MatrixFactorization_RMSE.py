@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+
+@author: Massimo Quadrana
+"""
+
 import logging
 
 import numpy as np

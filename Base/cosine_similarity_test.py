@@ -1,3 +1,9 @@
+"""
+Created on 23/10/17
+
+@author: Maurizio Ferrari Dacrema
+"""
+
 import unittest
 
 from Base.Recommender_utils import similarityMatrixTopK
