@@ -51,11 +51,11 @@ cdef class SLIM_BPR_Cython_Epoch:
     cdef int[:] URM_mask_indices, URM_mask_indptr
 
 
-    cdef S_sparse
+    cdef Sparse_Matrix_Tree_CSR S_sparse
     cdef double[:,:] S_dense
 
 
-    def __init__(self, URM_mask, sparse_weights, eligibleUsers,# S,
+    def __init__(self, URM_mask, sparse_weights, eligibleUsers,
                  learning_rate = 0.05,
                  batch_size = 1, topK=False, sgd_mode='adagrad'):
 
@@ -75,7 +75,6 @@ cdef class SLIM_BPR_Cython_Epoch:
         if self.sparse_weights:
 
             self.S_sparse = Sparse_Matrix_Tree_CSR(self.n_items, self.n_items)
-            #self.S_sparse = Sparse_Matrix_CSR(self.n_items, self.n_items)
 
         else:
             self.S_dense = np.zeros((self.n_items, self.n_items), dtype=np.float64)
@@ -161,8 +160,6 @@ cdef class SLIM_BPR_Cython_Epoch:
                 seenItem = self.seenItemsSampledUser[index]
                 index +=1
 
-                #print("Get: i {}, j {}, seenItem {}".format(i, j, seenItem))
-
                 if self.sparse_weights:
 
                    x_uij += self.S_sparse.get_value(i, seenItem) - self.S_sparse.get_value(j, seenItem)
@@ -183,8 +180,8 @@ cdef class SLIM_BPR_Cython_Epoch:
             elif self.rmsprop:
                 cacheUpdate = sgd_cache[i] * gamma + (1 - gamma) * gradient ** 2
 
-                sgd_cache[i] += cacheUpdate
-                sgd_cache[j] += cacheUpdate
+                sgd_cache[i] = cacheUpdate
+                sgd_cache[j] = cacheUpdate
 
                 gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
 
@@ -274,14 +271,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         cdef int negItemSelected
 
 
-
-        # Warning: rand() returns an integer, in order to avoid integer division we force the
-        # denominator to be a float
-        cdef double RAND_MAX_DOUBLE = RAND_MAX
-
-
         index = rand() % self.numEligibleUsers
-
 
         sample.user = self.eligibleUsers[index]
 
@@ -309,7 +299,6 @@ cdef class SLIM_BPR_Cython_Epoch:
             if index == self.numSeenItemsSampledUser:
                 negItemSelected = True
 
-        #print(sample)
 
         return sample
 
