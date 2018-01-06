@@ -55,18 +55,12 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
         self.sparse_weights = sparse_weights
         self.positive_threshold = positive_threshold
 
-        #self.URM_mask = self.URM_train >= self.positive_threshold
 
         self.URM_mask = self.URM_train.copy()
 
         self.URM_mask.data = self.URM_mask.data >= self.positive_threshold
         self.URM_mask.eliminate_zeros()
 
-
-        if self.sparse_weights:
-            self.S = sps.csr_matrix((self.n_items, self.n_items), dtype=np.float32)
-        else:
-            self.S = np.zeros((self.n_items, self.n_items)).astype('float32')
 
 
 
@@ -207,6 +201,12 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
 
 
+        if self.sparse_weights:
+            self.S = sps.csr_matrix((self.n_items, self.n_items), dtype=np.float32)
+        else:
+            self.S = np.zeros((self.n_items, self.n_items)).astype('float32')
+
+
         self.initializeFastSampling(positive_threshold=self.positive_threshold)
 
 
@@ -255,33 +255,34 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
             start_time_epoch = time.time()
 
-            if currentEpoch > 0:
-                if self.batch_size>0:
-                    self.epochIteration()
-                else:
-                    print("No batch not available")
+            if self.batch_size>0:
+                self.epochIteration()
             else:
-                self.updateSimilarityMatrix()
+                print("No batch not available")
 
-            if (URM_test is not None) and (currentEpoch % validate_every_N_epochs == 0) and \
+
+            if (URM_test is not None) and ((currentEpoch +1 )% validate_every_N_epochs == 0) and \
                             currentEpoch >= start_validation_after_N_epochs:
 
                 print("Evaluation begins")
 
+                self.updateSimilarityMatrix()
 
                 results_run = self.evaluateRecommendations(URM_test, filterTopPop=filterTopPop,
                                                            minRatingsPerUser=minRatingsPerUser)
 
                 self.writeCurrentConfig(currentEpoch, results_run, logFile)
 
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
                                                                      float(time.time() - start_time_epoch) / 60))
 
 
             # Fit with no validation
             else:
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
                                                                          float(time.time() - start_time_epoch) / 60))
+
+        self.updateSimilarityMatrix()
 
         print("Fit completed in {:.2f} minutes".format(float(time.time() - start_time_train) / 60))
 
@@ -355,5 +356,5 @@ class SLIM_BPR_Python(BPR_Sampling, Similarity_Matrix_Recommender, Recommender):
 
         self.S[np.arange(0, self.n_items), np.arange(0, self.n_items)] = 0.0
 
-        self.updateSimilarityMatrix()
+
 

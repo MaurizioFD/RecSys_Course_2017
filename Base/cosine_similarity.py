@@ -171,6 +171,7 @@ class Cosine_Similarity:
         cols = []
 
         start_time = time.time()
+        start_time_print_batch = start_time
         processedItems = 0
 
         if self.adjusted_cosine:
@@ -200,7 +201,7 @@ class Cosine_Similarity:
 
             processedItems += 1
 
-            if processedItems % 2000 == 0 or processedItems==self.n_columns:
+            if time.time() - start_time_print_batch >= 30 or processedItems==self.n_columns:
                 columnPerSec = processedItems / (time.time() - start_time)
 
                 print("Similarity column {} ( {:2.0f} % ), {:.2f} column/sec, elapsed time {:.2f} min".format(
@@ -208,6 +209,8 @@ class Cosine_Similarity:
 
                 sys.stdout.flush()
                 sys.stderr.flush()
+
+                start_time_print_batch = time.time()
 
 
             # All data points for a given item

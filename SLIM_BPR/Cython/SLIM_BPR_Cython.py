@@ -16,7 +16,9 @@ import numpy as np
 class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
-    def __init__(self, URM_train, positive_threshold=4, recompile_cython = False, sparse_weights = False, sgd_mode='adagrad'):
+    def __init__(self, URM_train, positive_threshold=4,
+                 recompile_cython = False, sparse_weights = False,
+                 symmetric = True, sgd_mode='adagrad'):
 
 
         super(SLIM_BPR_Cython, self).__init__(URM_train,
@@ -25,6 +27,19 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
         self.sgd_mode = sgd_mode
+        self.symmetric = symmetric
+
+        if not sparse_weights:
+
+            n_items = URM_train.shape[1]
+            requiredGB = 8 * n_items**2 / 1e+06
+
+            if symmetric:
+                requiredGB /=2
+
+            print("SLIM_BPR_Cython: Estimated memory required for similarity matrix of {} items is {:.2f} MB".format(n_items, requiredGB))
+
+
 
 
         if recompile_cython:
@@ -36,10 +51,8 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
 
     def fit(self, epochs=30, logFile=None, URM_test=None, filterTopPop = False, minRatingsPerUser=1,
             batch_size = 1000, validate_every_N_epochs = 1, start_validation_after_N_epochs = 0,
-            lambda_i = 0.0025, lambda_j = 0.00025, learning_rate = 0.05, topK = False, sgd_mode='adagrad'):
+            lambda_i = 0.0, lambda_j = 0.0, learning_rate = 0.01, topK = 200, sgd_mode='adagrad'):
 
-
-        self.eligibleUsers = []
 
         # Select only positive interactions
         URM_train_positive = self.URM_train.copy()
@@ -47,15 +60,7 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
         URM_train_positive.data = URM_train_positive.data >= self.positive_threshold
         URM_train_positive.eliminate_zeros()
 
-        for user_id in range(self.n_users):
 
-            start_pos = URM_train_positive.indptr[user_id]
-            end_pos = URM_train_positive.indptr[user_id+1]
-
-            if len(URM_train_positive.indices[start_pos:end_pos]) > 0:
-                self.eligibleUsers.append(user_id)
-
-        self.eligibleUsers = np.array(self.eligibleUsers, dtype=np.int64)
         self.sgd_mode = sgd_mode
 
 
@@ -64,11 +69,13 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
 
 
         self.cythonEpoch = SLIM_BPR_Cython_Epoch(self.URM_mask,
-                                                 self.sparse_weights,
-                                                 self.eligibleUsers,
+                                                 sparse_weights = self.sparse_weights,
                                                  topK=topK,
                                                  learning_rate=learning_rate,
+                                                 li_reg = lambda_i,
+                                                 lj_reg = lambda_j,
                                                  batch_size=1,
+                                                 symmetric = self.symmetric,
                                                  sgd_mode = sgd_mode)
 
 
@@ -129,17 +136,24 @@ class SLIM_BPR_Cython(SLIM_BPR_Python):
         #python compileCython.py SLIM_BPR_Cython_Epoch.pyx build_ext --inplace
 
         # Command to generate html report
-        #subprocess.call(["cython", "-a", "SLIM_BPR_Cython_Epoch.pyx"])
+        # cython -a SLIM_BPR_Cython_Epoch.pyx
 
 
-    def epochIteration(self):
+    def updateSimilarityMatrix(self):
 
-        self.S = self.cythonEpoch.epochIteration_Cython()
+        self.S = self.cythonEpoch.get_S()
 
         if self.sparse_weights:
             self.W_sparse = self.S
         else:
             self.W = self.S
+
+
+
+    def epochIteration(self):
+
+        self.cythonEpoch.epochIteration_Cython()
+
 
 
 

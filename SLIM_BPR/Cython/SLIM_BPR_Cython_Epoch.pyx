@@ -29,6 +29,9 @@ cdef struct BPR_sample:
     long user
     long pos_item
     long neg_item
+    long seen_items_start_pos
+    long seen_items_end_pos
+
 
 
 cdef class SLIM_BPR_Cython_Epoch:
@@ -37,27 +40,24 @@ cdef class SLIM_BPR_Cython_Epoch:
     cdef int n_items
     cdef int numPositiveIteractions
     cdef int topK
-    cdef int useAdaGrad, rmsprop
+    cdef int symmetric, sparse_weights
+    cdef int useAdaGrad, useRmsprop
 
-    cdef float learning_rate
+    cdef float learning_rate, li_reg, lj_reg
 
-    cdef int batch_size, sparse_weights
-    cdef long[:] eligibleUsers
-    cdef long numEligibleUsers
+    cdef int batch_size
 
-    cdef int[:] seenItemsSampledUser
-    cdef int numSeenItemsSampledUser
 
     cdef int[:] URM_mask_indices, URM_mask_indptr
 
-
     cdef Sparse_Matrix_Tree_CSR S_sparse
+    cdef Triangular_Matrix S_symmetric
     cdef double[:,:] S_dense
 
 
-    def __init__(self, URM_mask, sparse_weights, eligibleUsers,
-                 learning_rate = 0.05,
-                 batch_size = 1, topK=False, sgd_mode='adagrad'):
+    def __init__(self, URM_mask, sparse_weights = False,
+                 learning_rate = 0.01, li_reg = 0.0, lj_reg = 0.0,
+                 batch_size = 1, topK = 150, symmetric = True, sgd_mode='adagrad'):
 
         super(SLIM_BPR_Cython_Epoch, self).__init__()
 
@@ -67,15 +67,26 @@ cdef class SLIM_BPR_Cython_Epoch:
         self.n_users = URM_mask.shape[0]
         self.n_items = URM_mask.shape[1]
         self.topK = topK
+        self.learning_rate = learning_rate
+        self.li_reg = li_reg
+        self.lj_reg = lj_reg
+        self.batch_size = batch_size
+
+
+        if sparse_weights:
+            symmetric = False
+
         self.sparse_weights = sparse_weights
+        self.symmetric = symmetric
 
         self.URM_mask_indices = URM_mask.indices
         self.URM_mask_indptr = URM_mask.indptr
 
         if self.sparse_weights:
-
             self.S_sparse = Sparse_Matrix_Tree_CSR(self.n_items, self.n_items)
 
+        elif self.symmetric:
+            self.S_symmetric = Triangular_Matrix(self.n_items, isSymmetric = True)
         else:
             self.S_dense = np.zeros((self.n_items, self.n_items), dtype=np.float64)
 
@@ -84,7 +95,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         if sgd_mode=='adagrad':
             self.useAdaGrad = True
         elif sgd_mode=='rmsprop':
-            self.rmsprop = True
+            self.useRmsprop = True
         elif sgd_mode=='sgd':
             pass
         else:
@@ -93,17 +104,6 @@ cdef class SLIM_BPR_Cython_Epoch:
                     sgd_mode))
 
 
-
-        self.learning_rate = learning_rate
-
-        self.batch_size = batch_size
-
-        self.eligibleUsers = eligibleUsers
-        self.numEligibleUsers = len(eligibleUsers)
-
-    # Using memoryview instead of the sparse matrix itself allows for much faster access
-    cdef int[:] getSeenItems(self, long index):
-        return self.URM_mask_indices[self.URM_mask_indptr[index]:self.URM_mask_indptr[index + 1]]
 
 
 
@@ -118,7 +118,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         cdef BPR_sample sample
         cdef long i, j
         cdef long index, seenItem, numCurrentBatch, itemId
-        cdef float x_uij, gradient
+        cdef float x_uij, gradient, loss = 0.0
 
         cdef int numSeenItems
         cdef int printStep
@@ -136,7 +136,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         if self.useAdaGrad:
             sgd_cache = np.zeros((self.n_items), dtype=float)
 
-        elif self.rmsprop:
+        elif self.useRmsprop:
             sgd_cache = np.zeros((self.n_items), dtype=float)
             gamma = 0.001
 
@@ -145,7 +145,7 @@ cdef class SLIM_BPR_Cython_Epoch:
         # Uniform user sampling without replacement
         for numCurrentBatch in range(totalNumberOfBatch):
 
-            sample = self.sampleBatch_Cython()
+            sample = self.sampleBPR_Cython()
 
             i = sample.pos_item
             j = sample.neg_item
@@ -155,19 +155,24 @@ cdef class SLIM_BPR_Cython_Epoch:
             # The difference is computed on the user_seen items
 
             index = 0
-            while index<self.numSeenItemsSampledUser:
+            while index <  sample.seen_items_end_pos - sample.seen_items_start_pos:
 
-                seenItem = self.seenItemsSampledUser[index]
+                seenItem = self.URM_mask_indices[sample.seen_items_start_pos + index]
                 index +=1
 
                 if self.sparse_weights:
-
                    x_uij += self.S_sparse.get_value(i, seenItem) - self.S_sparse.get_value(j, seenItem)
+
+                elif self.symmetric:
+                    x_uij += self.S_symmetric.get_value(i, seenItem) - self.S_symmetric.get_value(j, seenItem)
+
                 else:
                     x_uij += self.S_dense[i, seenItem] - self.S_dense[j, seenItem]
 
 
             gradient = 1 / (1 + exp(x_uij))
+            loss += x_uij**2
+
 
             if self.useAdaGrad:
                 cacheUpdate = gradient ** 2
@@ -177,7 +182,7 @@ cdef class SLIM_BPR_Cython_Epoch:
 
                 gradient = gradient / (sqrt(sgd_cache[i]) + 1e-8)
 
-            elif self.rmsprop:
+            elif self.useRmsprop:
                 cacheUpdate = sgd_cache[i] * gamma + (1 - gamma) * gradient ** 2
 
                 sgd_cache[i] = cacheUpdate
@@ -190,38 +195,59 @@ cdef class SLIM_BPR_Cython_Epoch:
 
 
             index = 0
-            while index < self.numSeenItemsSampledUser:
+            while index < sample.seen_items_end_pos - sample.seen_items_start_pos:
 
-                seenItem = self.seenItemsSampledUser[index]
+                seenItem = self.URM_mask_indices[sample.seen_items_start_pos + index]
                 index +=1
 
                 if self.sparse_weights:
+                    # Since the sparse matrix is slower compared to the others
+                    # If no reg is required, avoid accessing it
 
                     if seenItem != i:
-                        self.S_sparse.add_value(i, seenItem, self.learning_rate * gradient)
+                        if self.li_reg!= 0.0:
+                            self.S_sparse.add_value(i, seenItem, self.learning_rate * (gradient - self.li_reg * self.S_sparse.get_value(i, seenItem)))
+                        else:
+                            self.S_sparse.add_value(i, seenItem, self.learning_rate * gradient)
+
 
                     if seenItem != j:
-                        self.S_sparse.add_value(j, seenItem, -self.learning_rate * gradient)
+                        if self.lj_reg!= 0.0:
+                            self.S_sparse.add_value(j, seenItem, -self.learning_rate * (gradient - self.lj_reg * self.S_sparse.get_value(j, seenItem)))
+                        else:
+                            self.S_sparse.add_value(j, seenItem, -self.learning_rate * gradient)
+
+
+                elif self.symmetric:
+
+                    if seenItem != i:
+                        self.S_symmetric.add_value(i, seenItem, self.learning_rate * (gradient - self.li_reg * self.S_symmetric.get_value(i, seenItem)))
+
+                    if seenItem != j:
+                        self.S_symmetric.add_value(j, seenItem, -self.learning_rate * (gradient - self.lj_reg * self.S_symmetric.get_value(j, seenItem)))
 
                 else:
 
                     if seenItem != i:
-                        self.S_dense[i, seenItem] += self.learning_rate * gradient
+                        self.S_dense[i, seenItem] += self.learning_rate * (gradient - self.li_reg * self.S_dense[i, seenItem])
 
                     if seenItem != j:
-                        self.S_dense[j, seenItem] -= self.learning_rate * gradient
+                        self.S_dense[j, seenItem] -= self.learning_rate * (gradient - self.lj_reg * self.S_dense[j, seenItem])
+
 
 
             # If I have reached at least 20% of the total number of batches or samples
+            # This allows to limit the memory occupancy of the sparse matrix
             if self.sparse_weights and numCurrentBatch % (totalNumberOfBatch/5) == 0 and numCurrentBatch!=0:
                 self.S_sparse.rebalance_tree(TopK=self.topK)
 
 
             if((numCurrentBatch%printStep==0 and not numCurrentBatch==0) or numCurrentBatch==totalNumberOfBatch-1):
-                print("Processed {} ( {:.2f}% ) in {:.2f} seconds. Sample per second: {:.0f}".format(
+                print("Processed {} ( {:.2f}% ) in {:.2f} seconds. BPR loss is {:.2E}. Sample per second: {:.0f}".format(
                     numCurrentBatch*self.batch_size,
                     100.0* float(numCurrentBatch*self.batch_size)/self.numPositiveIteractions,
                     time.time() - start_time_batch,
+                    loss/(numCurrentBatch*self.batch_size + 1),
                     float(numCurrentBatch*self.batch_size + 1) / (time.time() - start_time_epoch)))
 
                 sys.stdout.flush()
@@ -230,13 +256,21 @@ cdef class SLIM_BPR_Cython_Epoch:
                 start_time_batch = time.time()
 
 
-        # FIll diagonal with zeros
 
-        index = 0
+
+    def get_S(self):
+
+        # FIll diagonal with zeros
+        cdef int index = 0
+
         while index < self.n_items:
 
             if self.sparse_weights:
                 self.S_sparse.add_value(index, index, -self.S_sparse.get_value(index, index))
+
+            elif self.symmetric:
+                self.S_symmetric.add_value(index, index, -self.S_symmetric.get_value(index, index))
+
             else:
                 self.S_dense[index, index] = 0.0
 
@@ -245,43 +279,55 @@ cdef class SLIM_BPR_Cython_Epoch:
 
 
         if self.topK == False:
-            print("Return S matrix to python caller")
 
             if self.sparse_weights:
                 return self.S_sparse.get_scipy_csr(TopK = False)
+
+            elif self.symmetric:
+                return self.S_symmetric.get_scipy_csr(TopK = False)
+
             else:
                 return np.array(self.S_dense)
 
 
         else :
-            print("Return S matrix to python caller")
 
             if self.sparse_weights:
                 return self.S_sparse.get_scipy_csr(TopK=self.topK)
+
+            elif self.symmetric:
+                return self.S_symmetric.get_scipy_csr(TopK=self.topK)
+
             else:
                 return similarityMatrixTopK(np.array(self.S_dense.T), k=self.topK, forceSparseOutput=True, inplace=True).T
 
 
 
 
-    cdef BPR_sample sampleBatch_Cython(self):
 
-        cdef BPR_sample sample = BPR_sample(-1,-1,-1)
+    cdef BPR_sample sampleBPR_Cython(self):
+
+        cdef BPR_sample sample = BPR_sample(-1,-1,-1,-1,-1)
+
         cdef long index
-        cdef int negItemSelected
+
+        cdef int negItemSelected, numSeenItems = 0
 
 
-        index = rand() % self.numEligibleUsers
+        # Skip users with no interactions or with no negative items
+        while numSeenItems == 0 or numSeenItems == self.n_items:
 
-        sample.user = self.eligibleUsers[index]
+            sample.user = rand() % self.n_users
 
-        self.seenItemsSampledUser = self.getSeenItems(sample.user)
-        self.numSeenItemsSampledUser = len(self.seenItemsSampledUser)
+            sample.seen_items_start_pos = self.URM_mask_indptr[sample.user]
+            sample.seen_items_end_pos = self.URM_mask_indptr[sample.user + 1]
 
-        index = rand() % self.numSeenItemsSampledUser
+            numSeenItems = sample.seen_items_end_pos - sample.seen_items_start_pos
 
 
-        sample.pos_item = self.seenItemsSampledUser[index]
+        index = rand() % numSeenItems
+
+        sample.pos_item = self.URM_mask_indices[sample.seen_items_start_pos + index]
 
 
         negItemSelected = False
@@ -293,14 +339,15 @@ cdef class SLIM_BPR_Cython_Epoch:
             sample.neg_item = rand() % self.n_items
 
             index = 0
-            while index < self.numSeenItemsSampledUser and self.seenItemsSampledUser[index]!=sample.neg_item:
+            while index < numSeenItems and self.URM_mask_indices[sample.seen_items_start_pos + index]!=sample.neg_item:
                 index+=1
 
-            if index == self.numSeenItemsSampledUser:
+            if index == numSeenItems:
                 negItemSelected = True
 
 
         return sample
+
 
 
 
@@ -672,8 +719,10 @@ cdef class Sparse_Matrix_Tree_CSR:
         column = []
 
         while head != NULL:
-            data.append(head.data)
-            column.append(head.column)
+
+            if head.data != 0.0:
+                data.append(head.data)
+                column.append(head.column)
 
             head = head.higher
 
@@ -1005,6 +1054,206 @@ cdef class Sparse_Matrix_Tree_CSR:
         print("TopK extracted content - Passed")
 
 
+
+##################################################################################################################
+#####################
+#####################            TRIANGULAR MATRIX
+#####################
+##################################################################################################################
+
+
+
+
+
+import scipy.sparse as sps
+
+import numpy as np
+cimport numpy as np
+
+from libc.stdlib cimport malloc
+
+from cpython.array cimport array, clone
+
+
+#################################
+#################################       CLASS DECLARATION
+#################################
+
+cdef class Triangular_Matrix:
+
+    cdef long num_rows, num_cols
+    cdef int isSymmetric
+
+    cdef double** row_pointer
+
+
+
+
+
+    def __init__(self, long num_rows, int isSymmetric = False):
+
+        cdef int numRow, numCol
+
+        self.num_rows = num_rows
+        self.num_cols = num_rows
+        self.isSymmetric = isSymmetric
+
+        self.row_pointer = <double **> malloc(self.num_rows * sizeof(double*))
+
+
+
+        # Initialize all rows to empty
+        for numRow in range(self.num_rows):
+            self.row_pointer[numRow] = < double *> malloc((numRow+1) * sizeof(double))
+
+            for numCol in range(numRow+1):
+                self.row_pointer[numRow][numCol] = 0.0
+
+
+    cpdef double add_value(self, long row, long col, double value):
+        """
+        The function adds a value to the specified cell. A new cell is created if necessary.         
+        
+        :param row: cell coordinates
+        :param col:  cell coordinates
+        :param value: value to add
+        :return double: resulting cell value
+        """
+
+        if row >= self.num_rows or col >= self.num_cols or row < 0 or col < 0:
+            raise ValueError("Cell is outside matrix. Matrix shape is ({},{}),"
+                             " coordinates given are ({},{})".format(
+                             self.num_rows, self.num_cols, row, col))
+
+        elif col > row:
+
+            if self.isSymmetric:
+                self.row_pointer[col][row] += value
+
+                return self.row_pointer[col][row]
+
+            else:
+                raise ValueError("Cell is in the upper triangular of the matrix,"
+                                 " current matrix is lower triangular."
+                                 " Coordinates given are ({},{})".format(row, col))
+        else:
+
+            self.row_pointer[row][col] += value
+
+            return self.row_pointer[row][col]
+
+
+
+    cpdef double get_value(self, long row, long col):
+        """
+        The function returns the value of the specified cell.         
+        
+        :param row: cell coordinates
+        :param col:  cell coordinates
+        :return double: cell value
+        """
+
+        if row >= self.num_rows or col >= self.num_cols or row < 0 or col < 0:
+            raise ValueError("Cell is outside matrix. Matrix shape is ({},{}), coordinates given are ({},{})".format(
+                self.num_rows, self.num_cols, row, col))
+
+        elif col > row:
+
+            if self.isSymmetric:
+                return self.row_pointer[col][row]
+
+            else:
+                raise ValueError("Cell is in the upper triangular of the matrix,"
+                                 " current matrix is lower triangular."
+                                 " Coordinates given are ({},{})".format(row, col))
+        else:
+
+            return self.row_pointer[row][col]
+
+
+
+
+    cpdef get_scipy_csr(self, long TopK = False):
+        """
+        The function returns the current sparse matrix as a scipy_csr object         
+   
+        :return double: scipy_csr object
+        """
+        cdef int terminate
+        cdef long row, col, index
+
+        cdef array[double] template_zero = array('d')
+        cdef array[double] currentRowArray = clone(template_zero, self.num_cols, zero=True)
+
+        # Declare numpy data type to use vetor indexing and simplify the topK selection code
+        cdef np.ndarray[long, ndim=1] top_k_partition, top_k_partition_sorting
+        cdef np.ndarray[np.float64_t, ndim=1] currentRowArray_np
+
+
+        data = []
+        indices = []
+        indptr = []
+
+        # Loop the rows
+        for row in range(self.num_rows):
+
+            #Always set indptr
+            indptr.append(len(data))
+
+            # Fill RowArray
+            for col in range(self.num_cols):
+
+                if col <= row:
+                    currentRowArray[col] = self.row_pointer[row][col]
+                else:
+                    if self.isSymmetric:
+                        currentRowArray[col] = self.row_pointer[col][row]
+                    else:
+                        currentRowArray[col] = 0.0
+
+
+            if TopK:
+
+                # Sort indices and select TopK
+                # Using numpy implies some overhead, unfortunately the plain C qsort function is even slower
+                #top_k_idx = np.argsort(this_item_weights) [-self.TopK:]
+
+                # Sorting is done in three steps. Faster then plain np.argsort for higher number of items
+                # because we avoid sorting elements we already know we don't care about
+                # - Partition the data to extract the set of TopK items, this set is unsorted
+                # - Sort only the TopK items, discarding the rest
+                # - Get the original item index
+
+                currentRowArray_np = - np.array(currentRowArray)
+                #
+                # Get the unordered set of topK items
+                top_k_partition = np.argpartition(currentRowArray_np, TopK-1)[0:TopK]
+                # Sort only the elements in the partition
+                top_k_partition_sorting = np.argsort(currentRowArray_np[top_k_partition])
+                # Get original index
+                top_k_idx = top_k_partition[top_k_partition_sorting]
+
+                for index in range(len(top_k_idx)):
+
+                    col = top_k_idx[index]
+
+                    if currentRowArray[col] != 0.0:
+                        indices.append(col)
+                        data.append(currentRowArray[col])
+
+            else:
+
+                for index in range(self.num_cols):
+
+                    if currentRowArray[index] != 0.0:
+                        indices.append(index)
+                        data.append(currentRowArray[index])
+
+
+        #Set terminal indptr
+        indptr.append(len(data))
+
+        return sps.csr_matrix((data, indices, indptr), shape=(self.num_rows, self.num_cols))
 
 
 

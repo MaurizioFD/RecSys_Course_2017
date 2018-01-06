@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on 5/09/2017
+Created on 23/10/17
 
 @author: Maurizio Ferrari Dacrema
 """
@@ -13,6 +13,7 @@ from Base.Similarity_Matrix_Recommender import Similarity_Matrix_Recommender
 try:
     from Base.Cython.cosine_similarity import Cosine_Similarity
 except ImportError:
+    print("Unable to load Cython Cosine_Similarity, reverting to Python")
     from Base.cosine_similarity import Cosine_Similarity
 
 

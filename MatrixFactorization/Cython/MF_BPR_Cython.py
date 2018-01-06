@@ -40,7 +40,6 @@ class MF_BPR_Cython(Recommender):
             learning_rate = 0.05, sgd_mode='sgd', user_reg = 0.0, positive_reg = 0.0, negative_reg = 0.0):
 
 
-        self.eligibleUsers = []
         self.num_factors = num_factors
         self.positive_threshold = positive_threshold
 
@@ -50,22 +49,7 @@ class MF_BPR_Cython(Recommender):
         URM_train_positive.data = URM_train_positive.data >= self.positive_threshold
         URM_train_positive.eliminate_zeros()
 
-
-        for user_id in range(self.n_users):
-
-            start_pos = URM_train_positive.indptr[user_id]
-            end_pos = URM_train_positive.indptr[user_id+1]
-
-            numUserInteractions = len(URM_train_positive.indices[start_pos:end_pos])
-
-            if  numUserInteractions > 0 and numUserInteractions<self.n_items:
-                self.eligibleUsers.append(user_id)
-
-        # self.eligibleUsers contains the userID having at least one positive interaction and one item non observed
-        self.eligibleUsers = np.array(self.eligibleUsers, dtype=np.int64)
         self.sgd_mode = sgd_mode
-
-
 
 
         # Import compiled module
@@ -73,8 +57,7 @@ class MF_BPR_Cython(Recommender):
 
 
         self.cythonEpoch = MF_BPR_Cython_Epoch(URM_train_positive,
-                                                 self.eligibleUsers,
-                                                 num_factors = self.num_factors,
+                                                 n_factors = self.num_factors,
                                                  learning_rate=learning_rate,
                                                  batch_size=1,
                                                  sgd_mode = sgd_mode,
@@ -93,11 +76,10 @@ class MF_BPR_Cython(Recommender):
 
             start_time_epoch = time.time()
 
-            if currentEpoch > 0:
-                if self.batch_size>0:
-                    self.epochIteration()
-                else:
-                    print("No batch not available")
+            if self.batch_size>0:
+                self.epochIteration()
+            else:
+                print("No batch not available")
 
 
             if (URM_test is not None) and (currentEpoch % validate_every_N_epochs == 0) and \
@@ -113,13 +95,13 @@ class MF_BPR_Cython(Recommender):
 
                 self.writeCurrentConfig(currentEpoch, results_run, logFile)
 
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
                                                                      float(time.time() - start_time_epoch) / 60))
 
 
             # Fit with no validation
             else:
-                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch, epochs,
+                print("Epoch {} of {} complete in {:.2f} minutes".format(currentEpoch+1, epochs,
                                                                          float(time.time() - start_time_epoch) / 60))
 
         # Ensure W and H are up to date

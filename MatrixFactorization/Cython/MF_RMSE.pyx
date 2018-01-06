@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on 5/09/2017
+Created on 23/10/17
 
 @author: Massimo Quadrana
 """
@@ -103,7 +101,7 @@ def FunkSVD_sgd(R, int num_factors=50, double lrate=0.01, double reg=0.015, int 
                     currentIteration, n_iterations,
                     (time.time() - start_time_batch)/60,
                     loss,
-                    float(nnz) / (time.time() - start_time_epoch)))
+                    float(nnz) / (time.time() - start_time_batch)))
 
         sys.stdout.flush()
         sys.stderr.flush()
