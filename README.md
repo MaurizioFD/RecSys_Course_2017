@@ -1,6 +1,9 @@
 # RecSys Course 2017
 This is the official repository for the 2017 Recommender Systems course at Polimi.
 
+## This repo is obsolete, please refer to the updated version [HERE](https://github.com/MaurizioFD/RecSys_Course_2018)
+
+
 #### This repo contains a Cython implementation of:
  - SLIM BPR: Uses a Cython tree-based sparse matrix, suitable for datasets whose number of items is too big for the
     dense similarity matrix to fit in memory. 
